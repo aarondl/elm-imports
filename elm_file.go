@@ -54,21 +54,23 @@ func (e *elmFile) requiredModules() map[string]struct{} {
 func (e *elmFile) addMissing() {
 	required := e.requiredModules()
 
-	for r := range required {
-		found := false
-
-		for _, imp := range e.Imports {
+	search := func(search string, space []importDef) bool {
+		for _, imp := range space {
 			name := imp.Alias
 			if len(name) == 0 {
 				name = imp.Name
 			}
 
-			if r == name {
-				found = true
-				break
+			if search == name {
+				return true
 			}
 		}
 
+		return false
+	}
+
+	for r := range required {
+		found := search(r, e.Imports) || search(r, defaultImports)
 		if !found {
 			e.Imports = append(e.Imports, importDef{Name: r})
 		}
@@ -102,26 +104,26 @@ func (e *elmFile) removeUnused() {
 	}
 }
 
-func (e *elmFile) remove019Defaults() {
-	defaults := []importDef{
-		{Name: "Basics", Exposing: []importSymbol{{Name: ".."}}},
-		{Name: "List", Exposing: []importSymbol{{Name: "List"}, {Name: "(::)"}}},
-		{Name: "Maybe", Exposing: []importSymbol{{Name: "Maybe", Constructors: []string{".."}}}},
-		{Name: "Result", Exposing: []importSymbol{{Name: "Result", Constructors: []string{".."}}}},
-		{Name: "String", Exposing: []importSymbol{{Name: "String"}}},
-		{Name: "Char", Exposing: []importSymbol{{Name: "Char"}}},
-		{Name: "Tuple"},
-		{Name: "Debug"},
-		{Name: "Platform", Exposing: []importSymbol{{Name: "Program"}}},
-		{Name: "Platform.Cmd", Alias: "Cmd", Exposing: []importSymbol{{Name: "Cmd"}}},
-		{Name: "Platform.Sub", Alias: "Sub", Exposing: []importSymbol{{Name: "Sub"}}},
-	}
+var defaultImports = []importDef{
+	{Name: "Basics", Exposing: []importSymbol{{Name: ".."}}},
+	{Name: "List", Exposing: []importSymbol{{Name: "List"}, {Name: "(::)"}}},
+	{Name: "Maybe", Exposing: []importSymbol{{Name: "Maybe", Constructors: []string{".."}}}},
+	{Name: "Result", Exposing: []importSymbol{{Name: "Result", Constructors: []string{".."}}}},
+	{Name: "String", Exposing: []importSymbol{{Name: "String"}}},
+	{Name: "Char", Exposing: []importSymbol{{Name: "Char"}}},
+	{Name: "Tuple"},
+	{Name: "Debug"},
+	{Name: "Platform", Exposing: []importSymbol{{Name: "Program"}}},
+	{Name: "Platform.Cmd", Alias: "Cmd", Exposing: []importSymbol{{Name: "Cmd"}}},
+	{Name: "Platform.Sub", Alias: "Sub", Exposing: []importSymbol{{Name: "Sub"}}},
+}
 
+func (e *elmFile) remove019Defaults() {
 	for i := 0; i < len(e.Imports); i++ {
 		imp := e.Imports[i]
 
 		found := false
-		for _, d := range defaults {
+		for _, d := range defaultImports {
 			if d.Equal(imp) {
 				found = true
 				break
@@ -287,9 +289,9 @@ func rewriteElmImports(in io.Reader, out io.Writer) error {
 	// now we have to rewrite the imports, write them, and write the buffered
 	// chunks of the file.
 
+	ef.addMissing()
 	ef.remove019Defaults()
 	ef.removeUnused()
-	ef.addMissing()
 	ef.sortImports()
 
 	// Buffered writer saves us from errors checks here, we do them below to
