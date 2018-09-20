@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"io"
@@ -27,14 +28,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	var output io.Writer = os.Stdout
-	if len(flagOutput) != 0 {
-		output, err = os.Create(flagOutput)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-	}
+	output := &bytes.Buffer{}
 
 	err = rewriteElmImports(input, output)
 	if err != nil {
@@ -47,7 +41,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	if closer, ok := output.(io.Closer); ok {
+	var outputWriter io.Writer = os.Stdout
+	if len(flagOutput) != 0 {
+		outputWriter, err = os.Create(flagOutput)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
+
+	if _, err = io.Copy(outputWriter, output); err != nil {
+		fmt.Fprintln(os.Stderr, "failed to copy output to output file", err)
+		os.Exit(1)
+	}
+
+	if closer, ok := outputWriter.(io.Closer); ok {
 		if err = closer.Close(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
