@@ -13,7 +13,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-var rgxSymbols = regexp.MustCompile(`[A-Z][a-z0-9]*(?:\.[A-Za-z]+)+`)
+var rgxSymbols = regexp.MustCompile(`[A-Z][A-Za-z0-9]*(?:\.[A-Za-z]+)+`)
 
 type elmFile struct {
 	FirstImport int
@@ -218,12 +218,15 @@ func rewriteElmImports(in io.Reader, out io.Writer) error {
 	scanningImports := false
 	scanningSymbols := false
 	sawModuleLine := false
+	inComment := false
+	lineIsComment := false
 
 	bufferLines := make([][]byte, 0, 512)
 
 	scanner := bufio.NewScanner(in)
 	writer := bufio.NewWriter(out)
 	for scanner.Scan() {
+		lineIsComment = false
 		line := scanner.Bytes()
 
 		if bytes.HasPrefix(line, []byte("import")) {
@@ -247,7 +250,17 @@ func rewriteElmImports(in io.Reader, out io.Writer) error {
 			}
 		}
 
-		if sawModuleLine {
+		if bytes.HasPrefix(line, []byte{'{', '-'}) {
+			inComment = true
+		} else if bytes.HasPrefix(line, []byte{'-', '}'}) {
+			inComment = false
+		}
+
+		if !inComment {
+			lineIsComment = bytes.HasPrefix(line, []byte{'-', '-'})
+		}
+
+		if sawModuleLine && !inComment && !lineIsComment {
 			for _, sym := range rgxSymbols.FindAll(line, -1) {
 				ef.Symbols = append(ef.Symbols, string(sym))
 			}
@@ -255,7 +268,9 @@ func rewriteElmImports(in io.Reader, out io.Writer) error {
 		sawModuleLine = sawModuleLine || bytes.HasPrefix(line, []byte("module"))
 
 		if scanningSymbols {
-			bufferLines = append(bufferLines, line)
+			lineCopy := make([]byte, len(line))
+			copy(lineCopy, line)
+			bufferLines = append(bufferLines, lineCopy)
 		} else {
 			if _, err := fmt.Fprintf(writer, "%s\n", line); err != nil {
 				return err
