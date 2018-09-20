@@ -13,7 +13,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-var rgxSymbols = regexp.MustCompile(`[A-Z][A-Za-z0-9]*(?:\.[A-Za-z]+)+`)
+var rgxSymbols = regexp.MustCompile(`\b[A-Z][A-Za-z0-9]*(?:\.[A-Za-z]+)+`)
 
 type elmFile struct {
 	FirstImport int
