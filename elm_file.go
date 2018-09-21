@@ -250,6 +250,9 @@ func rewriteElmImports(in io.Reader, out io.Writer) error {
 				scanningImports = false
 				scanningSymbols = true
 			}
+		} else if !scanningSymbols && sawModuleLine && len(line) != 0 {
+			scanningImports = false
+			scanningSymbols = true
 		}
 
 		if bytes.HasPrefix(line, []byte{'{', '-'}) {
