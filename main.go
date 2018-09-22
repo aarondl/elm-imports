@@ -10,10 +10,12 @@ import (
 
 var (
 	flagOutput string
+	flagDebug  bool
 )
 
 func main() {
 	flag.StringVar(&flagOutput, "output", "", "Write to this file instead of displaying diffs")
+	flag.BoolVar(&flagDebug, "debug", false, "Turn on debug mode")
 	flag.Parse()
 
 	args := flag.Args()

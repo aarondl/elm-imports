@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/davecgh/go-spew/spew"
 	"github.com/pkg/errors"
 )
 
@@ -215,103 +216,146 @@ func rewriteElmImportsFiles(in, out string) error {
 	return nil
 }
 
+const (
+	stateNone = iota
+	stateModule
+	stateImports
+	stateSymbols
+	stateComments
+	stateCommentLine
+)
+
 func rewriteElmImports(in io.Reader, out io.Writer) error {
 	ef := &elmFile{}
-	scanningImports := false
-	scanningSymbols := false
-	sawModuleLine := false
-	inComment := false
-	lineIsComment := false
 
 	bufferLines := make([][]byte, 0, 512)
-
 	scanner := bufio.NewScanner(in)
 	writer := bufio.NewWriter(out)
-	for scanner.Scan() {
-		lineIsComment = false
+
+	lineIndex := 0
+	startImports := -1
+	state := stateNone
+	prevState := stateNone
+
+	for ; scanner.Scan(); lineIndex++ {
 		line := scanner.Bytes()
 
-		if bytes.HasPrefix(line, []byte("import")) {
-			scanningImports = true
+		if flagDebug {
+			fmt.Fprintf(os.Stderr, "L(%d", state)
+		}
+
+		commentIndex := bytes.Index(line, []byte{'-', '-'})
+		if state != stateComments && bytes.HasPrefix(line, []byte{'{', '-'}) {
+			prevState = state
+			state = stateComments
+		} else if commentIndex == 0 {
+			if state != stateCommentLine {
+				prevState = state
+			}
+			state = stateCommentLine
+		} else if state == stateCommentLine {
+			state = prevState
+		} else {
+			switch state {
+			case stateNone:
+				if bytes.HasPrefix(line, []byte("module")) {
+					state = stateModule
+				}
+			case stateModule:
+				if bytes.HasPrefix(line, []byte("import")) {
+					state = stateImports
+					startImports = lineIndex
+				}
+			case stateImports:
+				if len(line) != 0 && !bytes.HasPrefix(line, []byte("import")) {
+					state = stateSymbols
+				}
+			}
+		}
+
+		if flagDebug {
+			fmt.Fprintf(os.Stderr, "->%d): %s\n", state, line)
+		}
+
+		switch state {
+		case stateComments:
+			if bytes.HasPrefix(line, []byte{'-', '}'}) {
+				state = prevState
+			}
+		case stateImports:
+			// Ignore whitespace between imports
+			if len(line) == 0 {
+				continue
+			}
+
 			def, err := parseImportDef(string(line))
 			if err != nil {
 				return errors.Wrapf(err, "failed to parse line: %s", line)
 			}
 			ef.Imports = append(ef.Imports, def)
 			continue
-		}
+		case stateSymbols:
+			// Read symbols if this line isn't a comment, remove the parts
+			// of it that are a comment
+			if commentIndex != 0 {
+				withoutComment := line
+				if commentIndex >= 0 {
+					withoutComment = line[:commentIndex]
+				}
 
-		if scanningImports {
-			if len(line) == 0 {
-				// Don't copy over any whitespace, and keep looking for imports
-				continue
-			} else {
-				// Write out imports
-				scanningImports = false
-				scanningSymbols = true
-			}
-		} else if !scanningSymbols && sawModuleLine && len(line) != 0 {
-			scanningImports = false
-			scanningSymbols = true
-		}
-
-		if bytes.HasPrefix(line, []byte{'{', '-'}) {
-			inComment = true
-		} else if bytes.HasPrefix(line, []byte{'-', '}'}) {
-			inComment = false
-		}
-
-		if !inComment {
-			lineIsComment = bytes.HasPrefix(line, []byte{'-', '-'})
-		}
-
-		if sawModuleLine && !inComment && !lineIsComment {
-			for _, sym := range rgxSymbols.FindAll(line, -1) {
-				ef.Symbols = append(ef.Symbols, string(sym))
+				for _, sym := range rgxSymbols.FindAll(withoutComment, -1) {
+					ef.Symbols = append(ef.Symbols, string(sym))
+				}
 			}
 		}
-		sawModuleLine = sawModuleLine || bytes.HasPrefix(line, []byte("module"))
 
-		if scanningSymbols {
-			lineCopy := make([]byte, len(line))
-			copy(lineCopy, line)
-			bufferLines = append(bufferLines, lineCopy)
-		} else {
-			if _, err := fmt.Fprintf(writer, "%s\n", line); err != nil {
-				return err
-			}
-		}
+		lineCopy := make([]byte, len(line))
+		copy(lineCopy, line)
+		bufferLines = append(bufferLines, lineCopy)
 	}
 
 	if err := scanner.Err(); err != nil {
 		return err
 	}
 
-	// At this point we've collected all imports and symbols and the file
-	// has been written up until the point where the imports started
-	// now we have to rewrite the imports, write them, and write the buffered
-	// chunks of the file.
+	if flagDebug {
+		sort.Strings(ef.Symbols)
+		fmt.Fprintf(os.Stderr, "Before: %s\n", spew.Sdump(ef))
+	}
 
 	ef.addMissing()
 	ef.remove019Defaults()
 	ef.removeUnused()
 	ef.sortImports()
 
-	// Buffered writer saves us from errors checks here, we do them below to
-	// fail fast.
-	for _, imp := range ef.Imports {
-		fmt.Fprintf(writer, "%s\n", imp)
+	if flagDebug {
+		fmt.Fprintf(os.Stderr, "After: %s\n", spew.Sdump(ef.Imports))
 	}
-	writer.Write([]byte{'\n'})
 
-	for _, buf := range bufferLines {
-		if _, err := writer.Write(buf); err != nil {
-			return err
-		}
-		if _, err := writer.Write([]byte{'\n'}); err != nil {
-			return err
-		}
+	if flagDebug {
+		fmt.Fprintf(os.Stderr, "Output Line: %d\n", startImports)
 	}
+
+	if startImports < 0 {
+		writeBufferedLines(writer, bufferLines)
+		return writer.Flush()
+	}
+
+	// Buffered error handling allows us to omit error handling
+	// and the error will be returned on flush.
+	writeBufferedLines(writer, bufferLines[:startImports])
+	for _, imp := range ef.Imports {
+		_, _ = fmt.Fprintf(writer, "%s\n", imp)
+	}
+	_, _ = writer.Write([]byte{'\n'})
+	writeBufferedLines(writer, bufferLines[startImports:])
 
 	return writer.Flush()
+}
+
+func writeBufferedLines(out io.Writer, buffer [][]byte) {
+	for _, buf := range buffer {
+		_, _ = out.Write(buf)
+		_, _ = out.Write([]byte{'\n'})
+	}
 }
