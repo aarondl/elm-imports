@@ -260,11 +260,19 @@ func rewriteElmImports(in io.Reader, out io.Writer) error {
 			case stateNone:
 				if bytes.HasPrefix(line, []byte("module")) {
 					state = stateModule
+				} else if bytes.HasPrefix(line, []byte("import")) {
+					state = stateImports
+					startImports = lineIndex
+				} else if len(line) != 0 {
+					state = stateSymbols
+					startImports = lineIndex
 				}
 			case stateModule:
 				if bytes.HasPrefix(line, []byte("import")) {
 					state = stateImports
 					startImports = lineIndex
+				} else if len(line) == 0 {
+					state = stateNone
 				}
 			case stateImports:
 				if len(line) != 0 && !bytes.HasPrefix(line, []byte("import")) {
