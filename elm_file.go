@@ -245,7 +245,12 @@ func rewriteElmImports(in io.Reader, out io.Writer) error {
 		}
 
 		commentIndex := bytes.Index(line, []byte{'-', '-'})
-		if state != stateComments && bytes.HasPrefix(line, []byte{'{', '-'}) {
+		if state != stateComments && bytes.HasPrefix(line, []byte{'{', '-'}) && bytes.HasSuffix(line, []byte{'-', '}'}) {
+			if state != stateCommentLine {
+				prevState = state
+			}
+			state = stateCommentLine
+		} else if state != stateComments && bytes.HasPrefix(line, []byte{'{', '-'}) {
 			prevState = state
 			state = stateComments
 		} else if commentIndex == 0 {
