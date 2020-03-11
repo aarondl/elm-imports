@@ -14,7 +14,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-var rgxSymbols = regexp.MustCompile(`\b[A-Z][A-Za-z0-9]*(?:\.[A-Za-z]+)+`)
+var rgxSymbols = regexp.MustCompile(`(?:[\(\s])[A-Z][A-Za-z0-9]*(?:\.[A-Za-z]+)+`)
 
 type elmFile struct {
 	FirstImport int
@@ -172,7 +172,12 @@ func parseElmFile(file string) (ef elmFile, err error) {
 			continue
 		}
 
-		ef.Symbols = append(ef.Symbols, rgxSymbols.FindAllString(line, -1)...)
+		symbs := rgxSymbols.FindAllString(line, -1)
+		for _, s := range symbs {
+			// Remove the ( or whitespace at the beginning of the symbol regex
+			ef.Symbols = append(ef.Symbols, s[1:])
+		}
+		// ef.Symbols = append(ef.Symbols, ...)
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -317,6 +322,8 @@ func rewriteElmImports(in io.Reader, out io.Writer) error {
 				}
 
 				for _, sym := range rgxSymbols.FindAll(withoutComment, -1) {
+					// Remove the ( or the whitespace at the beginning
+					sym = sym[1:]
 					ef.Symbols = append(ef.Symbols, string(sym))
 				}
 			}
